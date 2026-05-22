@@ -1,6 +1,5 @@
 const path = require('path');
 const fs = require('fs');
-const { DatabaseSync } = require('node:sqlite');
 
 // Ensure data directory exists
 const dataDir = path.join(__dirname, '..', 'data');
@@ -9,10 +8,25 @@ if (!fs.existsSync(dataDir)) {
 }
 
 const dbPath = path.join(dataDir, 'moderation.db');
-const db = new DatabaseSync(dbPath);
 
-// Enable WAL mode for better concurrent read performance
-db.exec('PRAGMA journal_mode = WAL');
+// ─── Database Driver ──────────────────────────────────────────────────────────
+// Uses node:sqlite (built-in, Node 22.5+). No extra npm packages required.
+// If you are on Node < 22, install better-sqlite3: npm install better-sqlite3
+// and swap the require below to: const Database = require('better-sqlite3');
+//                                const db = new Database(dbPath);
+// All prepared-statement calls are identical between the two drivers.
+
+let db;
+try {
+    const { DatabaseSync } = require('node:sqlite');
+    db = new DatabaseSync(dbPath);
+    // Enable WAL mode for better concurrent read performance
+    db.exec('PRAGMA journal_mode = WAL');
+} catch (e) {
+    console.error('❌ node:sqlite not available (requires Node 22.5+).');
+    console.error('   Install better-sqlite3 and update database.js as noted in the comments.');
+    process.exit(1);
+}
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
@@ -48,7 +62,6 @@ db.exec(`
 // Safe migrations for existing databases
 try { db.exec("ALTER TABLE guild_config ADD COLUMN admin_role_id TEXT"); } catch(e){}
 try { db.exec("ALTER TABLE guild_config ADD COLUMN starter_role_id TEXT"); } catch(e){}
-
 
 // ─── Prepared Statements ─────────────────────────────────────────────────────
 
@@ -153,7 +166,6 @@ const stmts = {
         ON CONFLICT(guild_id) DO UPDATE SET starter_role_id = excluded.starter_role_id
     `),
 
-
     exportActions: db.prepare(`
         SELECT * FROM mod_actions
         WHERE guild_id = ?
@@ -172,108 +184,80 @@ const stmts = {
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 module.exports = {
-    /**
-     * Log a new moderation action.
-     * @returns {Object} The inserted row (with id)
-     */
     logAction({ guild_id, action_type, vrchat_username, reason, moderator_id, moderator_tag, instance_info }) {
         const created_at = new Date().toISOString();
         const result = stmts.insertAction.run(
-            guild_id,
-            action_type,
-            vrchat_username,
-            reason,
-            moderator_id,
-            moderator_tag,
-            instance_info || null,
-            created_at
+            guild_id, action_type, vrchat_username, reason,
+            moderator_id, moderator_tag, instance_info || null, created_at
         );
         return { id: result.lastInsertRowid, created_at };
     },
 
-    /** Get a single case by ID */
     getAction(id, guild_id) {
         return stmts.getAction.get(id, guild_id);
     },
 
-    /** Get all actions for a VRChat username (exact match, case-insensitive) */
     getHistory(guild_id, vrchat_username) {
         return stmts.getHistory.all(guild_id, vrchat_username);
     },
 
-    /** Search actions by partial VRChat username */
     searchHistory(guild_id, query) {
         return stmts.searchHistory.all(guild_id, `%${query}%`);
     },
 
-    /** Get actions performed by a specific moderator */
     getModeratorActions(guild_id, moderator_id) {
         return stmts.getModeratorActions.all(guild_id, moderator_id);
     },
 
-    /** Get recent actions for the guild */
     getRecentActions(guild_id, limit = 10) {
         return stmts.getRecentActions.all(guild_id, limit);
     },
 
-    /** Get action type counts for the guild */
     getStats(guild_id) {
         return stmts.getStats.all(guild_id);
     },
 
-    /** Get top moderators by action count */
     getModeratorStats(guild_id) {
         return stmts.getModeratorStats.all(guild_id);
     },
 
-    /** Get a specific moderator's action breakdown */
     getModeratorPersonalStats(guild_id, moderator_id) {
         return stmts.getModeratorPersonalStats.all(guild_id, moderator_id);
     },
 
-    /** Get total action count */
     getTotalCount(guild_id) {
         const row = stmts.getTotalCount.get(guild_id);
         return row ? row.count : 0;
     },
 
-    /** Update the reason on a case */
     updateReason(id, guild_id, newReason) {
         return stmts.updateReason.run(newReason, id, guild_id);
     },
 
-    /** Delete a case */
     deleteAction(id, guild_id) {
         return stmts.deleteAction.run(id, guild_id);
     },
 
-    /** Get guild config */
     getConfig(guild_id) {
         return stmts.getConfig.get(guild_id);
     },
 
-    /** Set the mod-log channel */
     setLogChannel(guild_id, channel_id) {
         return stmts.upsertLogChannel.run(guild_id, channel_id);
     },
 
-    /** Set the required moderator role */
     setModRole(guild_id, role_id) {
         return stmts.upsertModRole.run(guild_id, role_id);
     },
 
-    /** Set the required admin role */
     setAdminRole(guild_id, role_id) {
         return stmts.upsertAdminRole.run(guild_id, role_id);
     },
 
-    /** Set the required starter moderator role */
     setStarterRole(guild_id, role_id) {
         return stmts.upsertStarterRole.run(guild_id, role_id);
     },
 
-
-    /** Export actions (optionally filtered by user) */
     exportActions(guild_id, limit = 100, vrchat_username = null) {
         if (vrchat_username) {
             return stmts.exportActionsForUser.all(guild_id, `%${vrchat_username}%`, limit);
@@ -281,7 +265,6 @@ module.exports = {
         return stmts.exportActions.all(guild_id, limit);
     },
 
-    /** Close the database (for graceful shutdown) */
     close() {
         db.close();
     },

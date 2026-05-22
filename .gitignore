@@ -1,0 +1,15 @@
+# Environment variables (NEVER commit these — they contain your bot token!)
+.env
+src/bot.env
+
+# Dependencies (install with: npm install)
+node_modules/
+
+# Database files (contain real user data)
+data/
+
+# OS / Editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

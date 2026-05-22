@@ -9,6 +9,7 @@ const { Client, Collection, GatewayIntentBits } = require('discord.js');
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers, // FIX: needed so member.roles.cache is populated
     ],
 });
 
